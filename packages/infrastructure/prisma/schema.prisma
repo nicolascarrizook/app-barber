@@ -1,0 +1,224 @@
+// Prisma Schema for Barbershop Management System
+// Clean Architecture - Infrastructure Layer
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// BARBER AGGREGATE
+// ============================================================================
+
+model Barber {
+  id        String   @id @default(uuid())
+  firstName String   @map("first_name")
+  lastName  String   @map("last_name")
+  email     String   @unique
+  phone     String   @unique
+
+  // Specialties (stored as array)
+  specialties String[]
+
+  // Schedule (stored as JSONB)
+  schedule Json @default("{}")
+
+  // Status
+  status String @default("ACTIVE") // ACTIVE, INACTIVE, ON_LEAVE
+
+  // Performance metrics
+  commissionRate Decimal @default(50) @map("commission_rate") @db.Decimal(5, 2)
+  rating         Decimal @default(0) @map("rating") @db.Decimal(3, 2)
+  totalAppointments Int  @default(0) @map("total_appointments")
+
+  // Profile
+  profileImageUrl String? @map("profile_image_url")
+  bio             String? @db.Text
+
+  // Optimistic locking
+  version Int @default(1)
+
+  // Timestamps
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  appointments Appointment[]
+
+  @@map("barbers")
+  @@index([email])
+  @@index([status])
+  @@index([specialties])
+}
+
+// ============================================================================
+// CLIENT AGGREGATE
+// ============================================================================
+
+model Client {
+  id        String   @id @default(uuid())
+  firstName String   @map("first_name")
+  lastName  String   @map("last_name")
+  email     String   @unique
+  phone     String   @unique
+
+  // Status
+  status String @default("ACTIVE") // ACTIVE, INACTIVE, SUSPENDED, BLOCKED
+
+  // Preferences (stored as JSONB)
+  preferences Json @default("{}")
+
+  // History metrics
+  totalAppointments     Int     @default(0) @map("total_appointments")
+  completedAppointments Int     @default(0) @map("completed_appointments")
+  cancelledAppointments Int     @default(0) @map("cancelled_appointments")
+  noShowAppointments    Int     @default(0) @map("no_show_appointments")
+  lifetimeValue         Decimal @default(0) @map("lifetime_value") @db.Decimal(10, 2)
+  lifetimeValueCurrency String  @default("ARS") @map("lifetime_value_currency")
+  totalPoints           Int     @default(0) @map("total_points")
+  firstVisit            DateTime? @map("first_visit")
+  lastVisit             DateTime? @map("last_visit")
+
+  // Loyalty
+  loyaltyTier String @default("BRONZE") @map("loyalty_tier") // BRONZE, SILVER, GOLD, PLATINUM
+
+  // Additional info
+  notes String? @db.Text
+
+  // Optimistic locking
+  version Int @default(1)
+
+  // Timestamps
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  appointments Appointment[]
+
+  @@map("clients")
+  @@index([email])
+  @@index([phone])
+  @@index([status])
+  @@index([loyaltyTier])
+}
+
+// ============================================================================
+// SERVICE AGGREGATE
+// ============================================================================
+
+model Service {
+  id          String @id @default(uuid())
+  name        String @unique
+  description String @db.Text
+
+  // Duration and pricing
+  durationMinutes Int     @map("duration_minutes")
+  price           Decimal @db.Decimal(10, 2)
+  currency        String  @default("USD")
+
+  // Category
+  category String // HAIRCUT, BEARD, STYLING, COLORING, TREATMENT
+
+  // Required skills (stored as array)
+  requiredSkills String[] @map("required_skills")
+
+  // Status
+  isActive Boolean @default(true) @map("is_active")
+
+  // Optimistic locking
+  version Int @default(1)
+
+  // Timestamps
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  appointments Appointment[]
+
+  @@map("services")
+  @@index([category])
+  @@index([isActive])
+  @@index([name])
+}
+
+// ============================================================================
+// APPOINTMENT AGGREGATE
+// ============================================================================
+
+model Appointment {
+  id String @id @default(uuid())
+
+  // Relations
+  barberId String @map("barber_id")
+  barber   Barber @relation(fields: [barberId], references: [id])
+
+  clientId String @map("client_id")
+  client   Client @relation(fields: [clientId], references: [id])
+
+  serviceId String  @map("service_id")
+  service   Service @relation(fields: [serviceId], references: [id])
+
+  // Time slot
+  startTime DateTime @map("start_time")
+  endTime   DateTime @map("end_time")
+
+  // Status
+  status String @default("PENDING") // PENDING, CONFIRMED, IN_PROGRESS, COMPLETED, CANCELLED, NO_SHOW
+
+  // Payment information (stored as JSONB)
+  paymentData Json? @map("payment_data")
+
+  // Additional info
+  notes String? @db.Text
+
+  // Cancellation
+  cancellationReason String? @map("cancellation_reason") @db.Text
+  cancelledAt        DateTime? @map("cancelled_at")
+
+  // Optimistic locking (critical for conflict resolution)
+  version Int @default(1)
+
+  // Timestamps
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("appointments")
+  @@index([barberId, startTime])
+  @@index([clientId])
+  @@index([serviceId])
+  @@index([status])
+  @@index([startTime, endTime])
+  // Composite index for conflict detection
+  @@index([barberId, startTime, endTime, status])
+}
+
+// ============================================================================
+// DOMAIN EVENTS (Event Sourcing - Optional)
+// ============================================================================
+
+model DomainEvent {
+  id String @id @default(uuid())
+
+  // Event metadata
+  eventType     String   @map("event_type")
+  aggregateType String   @map("aggregate_type")
+  aggregateId   String   @map("aggregate_id")
+  version       Int      @default(1)
+
+  // Event data (stored as JSONB)
+  eventData Json @map("event_data")
+
+  // Metadata
+  occurredAt DateTime @default(now()) @map("occurred_at")
+  processedAt DateTime? @map("processed_at")
+
+  @@map("domain_events")
+  @@index([aggregateType, aggregateId])
+  @@index([eventType])
+  @@index([occurredAt])
+}

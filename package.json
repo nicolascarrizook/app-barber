@@ -1,0 +1,36 @@
+{
+  "name": "barbershop-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Professional barbershop management system with Clean Architecture",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "test:watch": "turbo run test:watch",
+    "test:coverage": "turbo run test:coverage",
+    "lint": "turbo run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json}\"",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "typecheck": "turbo run typecheck",
+    "docker:start": "./scripts/start-dev.sh",
+    "docker:stop": "./scripts/stop-dev.sh",
+    "db:seed": "./scripts/seed-data.sh",
+    "db:reset": "./scripts/reset-db.sh"
+  },
+  "devDependencies": {
+    "@turbo/gen": "^1.11.0",
+    "turbo": "^1.11.0",
+    "prettier": "^3.1.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "packageManager": "npm@10.2.5"
+}

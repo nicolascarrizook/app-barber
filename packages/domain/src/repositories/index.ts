@@ -1,0 +1,5 @@
+export * from './repository.interface'
+export * from './appointment.repository.interface'
+export * from './barber.repository.interface'
+export * from './client.repository.interface'
+export * from './service.repository.interface'
