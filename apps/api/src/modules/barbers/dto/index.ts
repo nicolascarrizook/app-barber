@@ -1,0 +1,5 @@
+export * from './create-barber.dto'
+export * from './update-barber.dto'
+export * from './update-schedule.dto'
+export * from './barber-response.dto'
+export * from './barber-query.dto'

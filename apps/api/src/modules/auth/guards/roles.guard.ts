@@ -5,7 +5,7 @@ import { ROLES_KEY } from '../decorators/roles.decorator'
 /**
  * User Role Types
  */
-export type Role = 'CLIENT' | 'BARBER' | 'ADMIN'
+export type Role = 'CLIENT' | 'BARBER' | 'ADMIN' | 'MANAGER'
 
 /**
  * Roles Guard

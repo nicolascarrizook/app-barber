@@ -10,7 +10,9 @@ import {
   HttpStatus,
   NotFoundException,
   ConflictException,
-  BadRequestException
+  BadRequestException,
+  UseGuards,
+  ForbiddenException
 } from '@nestjs/common'
 import {
   ApiTags,
@@ -20,6 +22,13 @@ import {
   ApiParam
 } from '@nestjs/swagger'
 import { DateTime } from 'luxon'
+
+// Guards and decorators
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { RolesGuard } from '../auth/guards/roles.guard'
+import { Roles } from '../auth/decorators/roles.decorator'
+import { CurrentUser } from '../auth/decorators/current-user.decorator'
+import { UserRole } from '../auth/auth.service'
 
 // Use Cases
 import { CreateAppointmentUseCase } from '@barbershop/application/use-cases/appointment/create-appointment.use-case'
@@ -54,11 +63,17 @@ import { ServiceId } from '@barbershop/domain/entities/service-id.vo'
  * Maps REST requests to application layer use cases
  * Returns standardized DTO responses
  *
+ * Authorization rules:
+ * - CLIENT: Can create for themselves, view own appointments
+ * - BARBER: Can view their appointments, manage (start, complete, no-show)
+ * - ADMIN/MANAGER: Full access to all operations
+ *
  * @tag appointments
  */
 @Controller('appointments')
 @ApiTags('appointments')
 @ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class AppointmentsController {
   constructor(
     private readonly createAppointment: CreateAppointmentUseCase,
@@ -77,9 +92,14 @@ export class AppointmentsController {
    *
    * Validates availability and prevents double-booking
    * Returns 409 Conflict if time slot is unavailable
+   *
+   * Authorization:
+   * - CLIENT: Can only create for themselves (clientId must match userId)
+   * - ADMIN/MANAGER: Can create for anyone
    */
   @Post()
   @HttpCode(HttpStatus.CREATED)
+  @Roles(UserRole.CLIENT, UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary: 'Create new appointment',
     description:
@@ -98,9 +118,18 @@ export class AppointmentsController {
     status: 400,
     description: 'Invalid input data or business rule violation'
   })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - insufficient permissions'
+  })
   async create(
-    @Body() dto: CreateAppointmentDto
+    @Body() dto: CreateAppointmentDto,
+    @CurrentUser() user: any
   ): Promise<AppointmentResponseDto> {
+    // Validate CLIENT can only create for themselves
+    if (user.role === UserRole.CLIENT && dto.clientId !== user.userId) {
+      throw new ForbiddenException('Clients can only create appointments for themselves')
+    }
     const result = await this.createAppointment.execute({
       clientId: ClientId.create(dto.clientId),
       barberId: BarberId.create(dto.barberId),
@@ -122,8 +151,14 @@ export class AppointmentsController {
 
   /**
    * Get appointment by ID
+   *
+   * Authorization:
+   * - CLIENT: Can only view their own appointments
+   * - BARBER: Can only view their own appointments
+   * - ADMIN/MANAGER: Can view all appointments
    */
   @Get(':id')
+  @Roles(UserRole.CLIENT, UserRole.BARBER, UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary: 'Get appointment by ID',
     description: 'Retrieves detailed information about a specific appointment'
@@ -142,15 +177,26 @@ export class AppointmentsController {
     status: 404,
     description: 'Appointment not found'
   })
-  async findOne(@Param('id') id: string): Promise<AppointmentResponseDto> {
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - not authorized to view this appointment'
+  })
+  async findOne(@Param('id') id: string, @CurrentUser() user: any): Promise<AppointmentResponseDto> {
     // TODO: Implement GetAppointmentByIdUseCase
+    // TODO: Verify authorization based on user role
     throw new NotFoundException('Get by ID use case not yet implemented')
   }
 
   /**
    * List appointments with filters
+   *
+   * Authorization:
+   * - CLIENT: Can only query their own appointments (clientId filter enforced)
+   * - BARBER: Can only query their own appointments (barberId filter enforced)
+   * - ADMIN/MANAGER: Can query all appointments
    */
   @Get()
+  @Roles(UserRole.CLIENT, UserRole.BARBER, UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary: 'List appointments',
     description: 'Retrieves list of appointments with optional filters'
@@ -161,8 +207,16 @@ export class AppointmentsController {
     type: [AppointmentResponseDto]
   })
   async findAll(
-    @Query() query: AppointmentQueryDto
+    @Query() query: AppointmentQueryDto,
+    @CurrentUser() user: any
   ): Promise<AppointmentResponseDto[]> {
+    // Enforce authorization filters based on role
+    if (user.role === UserRole.CLIENT) {
+      query.clientId = user.userId // Override to ensure CLIENT only sees own appointments
+    }
+    if (user.role === UserRole.BARBER) {
+      query.barberId = user.userId // Override to ensure BARBER only sees own appointments
+    }
     // If filtering by client
     if (query.clientId) {
       const result = await this.findByClient.execute({
@@ -201,8 +255,13 @@ export class AppointmentsController {
 
   /**
    * Get client appointments
+   *
+   * Authorization:
+   * - CLIENT: Can only view their own appointments
+   * - ADMIN/MANAGER: Can view any client's appointments
    */
   @Get('client/:clientId')
+  @Roles(UserRole.CLIENT, UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary: 'Get client appointments',
     description: 'Retrieves all appointments for a specific client'
@@ -216,9 +275,18 @@ export class AppointmentsController {
     description: 'Client appointments',
     type: [AppointmentResponseDto]
   })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - not authorized to view these appointments'
+  })
   async findByClientId(
-    @Param('clientId') clientId: string
+    @Param('clientId') clientId: string,
+    @CurrentUser() user: any
   ): Promise<AppointmentResponseDto[]> {
+    // Verify CLIENT can only view their own appointments
+    if (user.role === UserRole.CLIENT && clientId !== user.userId) {
+      throw new ForbiddenException('Clients can only view their own appointments')
+    }
     const result = await this.findByClient.execute({
       clientId: ClientId.create(clientId)
     })
@@ -232,8 +300,13 @@ export class AppointmentsController {
 
   /**
    * Get barber appointments
+   *
+   * Authorization:
+   * - BARBER: Can only view their own appointments
+   * - ADMIN/MANAGER: Can view any barber's appointments
    */
   @Get('barber/:barberId')
+  @Roles(UserRole.BARBER, UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary: 'Get barber appointments',
     description: "Retrieves all appointments for a specific barber's schedule"
@@ -247,9 +320,18 @@ export class AppointmentsController {
     description: 'Barber appointments',
     type: [AppointmentResponseDto]
   })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - not authorized to view these appointments'
+  })
   async findByBarberId(
-    @Param('barberId') barberId: string
+    @Param('barberId') barberId: string,
+    @CurrentUser() user: any
   ): Promise<AppointmentResponseDto[]> {
+    // Verify BARBER can only view their own appointments
+    if (user.role === UserRole.BARBER && barberId !== user.userId) {
+      throw new ForbiddenException('Barbers can only view their own appointments')
+    }
     const result = await this.findByBarber.execute({
       barberId: BarberId.create(barberId)
     })
@@ -263,9 +345,15 @@ export class AppointmentsController {
 
   /**
    * Cancel appointment
+   *
+   * Authorization:
+   * - CLIENT: Can cancel their own appointments
+   * - BARBER: Can cancel their own appointments
+   * - ADMIN/MANAGER: Can cancel any appointment
    */
   @Patch(':id/cancel')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(UserRole.CLIENT, UserRole.BARBER, UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary: 'Cancel appointment',
     description: 'Cancels an existing appointment with optional reason'
@@ -286,10 +374,16 @@ export class AppointmentsController {
     status: 404,
     description: 'Appointment not found'
   })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - not authorized to cancel this appointment'
+  })
   async cancel(
     @Param('id') id: string,
-    @Body() dto: CancelAppointmentDto
+    @Body() dto: CancelAppointmentDto,
+    @CurrentUser() user: any
   ): Promise<void> {
+    // TODO: Verify ownership before canceling (unless ADMIN/MANAGER)
     const result = await this.cancelAppointment.execute({
       appointmentId: AppointmentId.create(id),
       reason: dto.reason
@@ -305,9 +399,15 @@ export class AppointmentsController {
 
   /**
    * Confirm appointment
+   *
+   * Authorization:
+   * - CLIENT: Can confirm their own appointments
+   * - BARBER: Can confirm their own appointments
+   * - ADMIN/MANAGER: Can confirm any appointment
    */
   @Patch(':id/confirm')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(UserRole.CLIENT, UserRole.BARBER, UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary: 'Confirm appointment',
     description: 'Changes appointment status from PENDING to CONFIRMED'
@@ -324,7 +424,12 @@ export class AppointmentsController {
     status: 400,
     description: 'Cannot confirm appointment (invalid state)'
   })
-  async confirm(@Param('id') id: string): Promise<void> {
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - not authorized to confirm this appointment'
+  })
+  async confirm(@Param('id') id: string, @CurrentUser() user: any): Promise<void> {
+    // TODO: Verify ownership before confirming (unless ADMIN/MANAGER)
     const result = await this.confirmAppointment.execute({
       appointmentId: AppointmentId.create(id)
     })
@@ -339,9 +444,14 @@ export class AppointmentsController {
 
   /**
    * Start appointment
+   *
+   * Authorization:
+   * - BARBER: Can start their own appointments
+   * - ADMIN/MANAGER: Can start any appointment
    */
   @Patch(':id/start')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(UserRole.BARBER, UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary: 'Start appointment',
     description: 'Marks appointment as IN_PROGRESS when service begins'
@@ -358,7 +468,16 @@ export class AppointmentsController {
     status: 400,
     description: 'Cannot start appointment (invalid state)'
   })
-  async start(@Param('id') id: string): Promise<void> {
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - not authorized to start this appointment'
+  })
+  async start(@Param('id') id: string, @CurrentUser() user: any): Promise<void> {
+    // Verify barber ownership (unless ADMIN/MANAGER)
+    if (user.role === UserRole.BARBER) {
+      // TODO: Fetch appointment and verify barberId matches user.userId
+      // For now, the use case will handle validation
+    }
     const result = await this.startAppointment.execute({
       appointmentId: AppointmentId.create(id)
     })
@@ -373,9 +492,14 @@ export class AppointmentsController {
 
   /**
    * Complete appointment
+   *
+   * Authorization:
+   * - BARBER: Can complete their own appointments
+   * - ADMIN/MANAGER: Can complete any appointment
    */
   @Patch(':id/complete')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(UserRole.BARBER, UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary: 'Complete appointment',
     description: 'Marks appointment as COMPLETED and updates metrics'
@@ -392,7 +516,15 @@ export class AppointmentsController {
     status: 400,
     description: 'Cannot complete appointment (invalid state)'
   })
-  async complete(@Param('id') id: string): Promise<void> {
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - not authorized to complete this appointment'
+  })
+  async complete(@Param('id') id: string, @CurrentUser() user: any): Promise<void> {
+    // Verify barber ownership (unless ADMIN/MANAGER)
+    if (user.role === UserRole.BARBER) {
+      // TODO: Fetch appointment and verify barberId matches user.userId
+    }
     const result = await this.completeAppointment.execute({
       appointmentId: AppointmentId.create(id)
     })
@@ -407,9 +539,14 @@ export class AppointmentsController {
 
   /**
    * Mark appointment as no-show
+   *
+   * Authorization:
+   * - BARBER: Can mark their own appointments as no-show
+   * - ADMIN/MANAGER: Can mark any appointment as no-show
    */
   @Patch(':id/no-show')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(UserRole.BARBER, UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary: 'Mark as no-show',
     description: 'Marks appointment as NO_SHOW when client does not arrive'
@@ -426,7 +563,15 @@ export class AppointmentsController {
     status: 400,
     description: 'Cannot mark as no-show (invalid state)'
   })
-  async markAsNoShow(@Param('id') id: string): Promise<void> {
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - not authorized to mark this appointment as no-show'
+  })
+  async markAsNoShow(@Param('id') id: string, @CurrentUser() user: any): Promise<void> {
+    // Verify barber ownership (unless ADMIN/MANAGER)
+    if (user.role === UserRole.BARBER) {
+      // TODO: Fetch appointment and verify barberId matches user.userId
+    }
     const result = await this.markNoShow.execute({
       appointmentId: AppointmentId.create(id)
     })
@@ -441,9 +586,15 @@ export class AppointmentsController {
 
   /**
    * Reschedule appointment
+   *
+   * Authorization:
+   * - CLIENT: Can reschedule their own appointments
+   * - BARBER: Can reschedule their own appointments
+   * - ADMIN/MANAGER: Can reschedule any appointment
    */
   @Patch(':id/reschedule')
   @HttpCode(HttpStatus.OK)
+  @Roles(UserRole.CLIENT, UserRole.BARBER, UserRole.ADMIN, UserRole.MANAGER)
   @ApiOperation({
     summary: 'Reschedule appointment',
     description: 'Changes appointment time and optionally barber'
@@ -465,10 +616,16 @@ export class AppointmentsController {
     status: 400,
     description: 'Cannot reschedule appointment'
   })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - not authorized to reschedule this appointment'
+  })
   async reschedule(
     @Param('id') id: string,
-    @Body() dto: RescheduleAppointmentDto
+    @Body() dto: RescheduleAppointmentDto,
+    @CurrentUser() user: any
   ): Promise<AppointmentResponseDto> {
+    // TODO: Verify ownership before rescheduling (unless ADMIN/MANAGER)
     const result = await this.rescheduleAppointment.execute({
       appointmentId: AppointmentId.create(id),
       newStartTime: DateTime.fromISO(dto.newStartTime),

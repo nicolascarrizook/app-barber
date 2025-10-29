@@ -10,6 +10,8 @@ import { AppService } from './app.service'
 import { DatabaseModule } from './modules/database/database.module'
 import { AuthModule } from './modules/auth/auth.module'
 import { AppointmentsModule } from './modules/appointments/appointments.module'
+import { BarbersModule } from './modules/barbers/barbers.module'
+import { ClientsModule } from './modules/clients/clients.module'
 import { AvailabilityModule } from './modules/availability/availability.module'
 import { AllExceptionsFilter } from './common/filters/http-exception.filter'
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor'
@@ -68,6 +70,8 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard'
 
     // Feature modules
     AppointmentsModule,
+    BarbersModule,
+    ClientsModule,
     AvailabilityModule
   ],
   controllers: [AppController],
