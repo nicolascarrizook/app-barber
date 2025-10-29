@@ -10,7 +10,7 @@ interface User {
   id: string
   email: string
   name: string
-  role: 'admin' | 'barber' | 'client'
+  role: 'admin' | 'manager' | 'barber' | 'client'
 }
 
 interface AuthState {

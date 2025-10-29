@@ -1,3 +1,5 @@
+'use client'
+
 import { DashboardSidebar } from '@/components/layout/dashboard-sidebar'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -10,6 +12,7 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { Button } from '@/components/ui/button'
+import { ProtectedRoute } from '@/components/auth/protected-route'
 
 interface DashboardLayoutProps {
   children: React.ReactNode
@@ -18,10 +21,12 @@ interface DashboardLayoutProps {
 /**
  * Dashboard Layout
  * Used for admin/dashboard pages with sidebar navigation
+ * Protected route - requires authentication
  */
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   return (
-    <div className="flex h-screen overflow-hidden">
+    <ProtectedRoute requiredRoles={['admin', 'manager']}>
+      <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
       <aside className="hidden lg:block">
         <DashboardSidebar />
@@ -78,6 +83,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           {children}
         </main>
       </div>
-    </div>
+      </div>
+    </ProtectedRoute>
   )
 }
